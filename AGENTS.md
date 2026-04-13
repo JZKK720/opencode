@@ -4,6 +4,33 @@
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
 
+## Architecture
+
+OpenCode is a monorepo. Key packages:
+
+| Package | Purpose |
+|---|---|
+| `packages/opencode` | Core CLI + Hono HTTP server (port 4096), TUI, Effect-TS services, SQLite via Drizzle |
+| `packages/app` | Web UI — SolidJS/Vite, connects to the backend API |
+| `packages/desktop` | Tauri native desktop app (wraps `packages/app`) |
+| `packages/desktop-electron` | Electron native desktop app |
+| `packages/sdk/js` | JavaScript/TypeScript SDK — auto-generated, do not edit directly |
+| `packages/plugin` | Plugin system source (`@opencode-ai/plugin`) |
+| `packages/ui` | Shared UI components |
+| `packages/console` | Admin console (SST-based) |
+
+**Runtime modes** — the `opencode` binary (or `bun dev`) supports:
+- Default (no subcommand): TUI in the current/specified directory
+- `serve`: Headless API server, port 4096 (fallback: random). JSON/WebSocket API.
+- `web`: Headless API server + opens browser to `app.opencode.ai` (or local dev app)
+- Key flags: `--port`, `--hostname` (default `127.0.0.1`), `--mdns`
+
+**Per-package AGENTS.md files** contain package-specific rules — always check them:
+- `packages/opencode/AGENTS.md` — database, Effect-TS patterns, `InstanceState` vs `makeRuntime`
+- `packages/app/AGENTS.md` — SolidJS, local dev (backend on :4096, app on :4444)
+- `packages/desktop/AGENTS.md` — never call `invoke` directly; use generated bindings
+- `packages/desktop-electron/AGENTS.md` — renderer only calls `window.api` from preload
+
 ## Style Guide
 
 ### General Principles
@@ -126,3 +153,37 @@ const table = sqliteTable("session", {
 ## Type Checking
 
 - Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+
+## Build and Docker
+
+See `CONTRIBUTING.md` for local dev setup and `bun dev` usage.
+
+**CLI binaries** — built by `packages/opencode/script/build.ts`, output to `packages/opencode/dist/`. The `dist/` directory is ephemeral: created by the build script (`rm -rf dist` at start), only lives during a CI run, and is absent in a clean checkout. That is expected and normal.
+
+**opencode Docker image** — `ghcr.io/anomalyco/opencode:{version|latest|beta}` — multi-arch (linux/amd64 + linux/arm64), based on Alpine. Built in `packages/opencode/script/publish.ts` after binaries are ready. The Dockerfile (`packages/opencode/Dockerfile`) copies the musl-static Linux binaries (`dist/opencode-linux-x64-baseline-musl` for amd64, `dist/opencode-linux-arm64-musl` for arm64). Building locally requires a Linux environment (WSL2 or CI) for musl cross-compilation.
+
+**CI containers** — prebuilt GitHub Actions images in `packages/containers/` (base → bun-node → rust → tauri-linux → publish), pushed to `ghcr.io/anomalyco/build/*`. Rebuilt only when `packages/containers/**` changes. See `packages/containers/README.md`.
+
+### Running as a Docker container with an exposed local port
+
+Pull the published image and run the headless API server or web mode:
+
+```bash
+# Headless API server on host port 4096
+docker run -p 4096:4096 \
+  -e OPENCODE_SERVER_PASSWORD=changeme \
+  ghcr.io/anomalyco/opencode:latest \
+  serve --hostname 0.0.0.0 --port 4096
+
+# Web mode (server only — no auto-open inside container)
+docker run -p 4096:4096 \
+  -e OPENCODE_SERVER_PASSWORD=changeme \
+  ghcr.io/anomalyco/opencode:latest \
+  web --hostname 0.0.0.0 --port 4096
+```
+
+Then open `http://localhost:4096` (API) or point the web app dev server at it.
+
+**Required**: `--hostname 0.0.0.0` — the default is `127.0.0.1` which is unreachable outside the container.  
+**Security**: always set `OPENCODE_SERVER_PASSWORD`; basic-auth is enforced when it is present. `OPENCODE_SERVER_USERNAME` defaults to `"opencode"`.  
+**Provider keys**: pass AI provider credentials as env vars (e.g., `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) or mount a config file via `-v ~/.config/opencode:/root/.config/opencode`.
