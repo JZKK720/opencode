@@ -182,6 +182,9 @@ docker run -p 4096:4096 \
   web --hostname 0.0.0.0 --port 4096
 ```
 
+If you mount a host workspace into the container and want `~` to resolve inside
+that mount, use `-w /projects -e OPENCODE_HOME=/projects -v "$PWD:/projects"`.
+
 Then open `http://localhost:4096` (API) or point the web app dev server at it.
 
 **Required**: `--hostname 0.0.0.0` — the default is `127.0.0.1` which is unreachable outside the container.  

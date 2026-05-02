@@ -10,6 +10,7 @@ import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
+import { useServer } from "@/context/server"
 
 interface DialogSelectDirectoryProps {
   title?: string
@@ -198,6 +199,14 @@ function useDirectorySearch(args: {
         .catch(() => [])
 
     if (!isPath) {
+      if (!query) {
+        // Empty input: list immediate children of the start directory so the
+        // picker shows something useful even when the recursive search cache
+        // is empty (e.g. Docker containers where /root has no user projects).
+        const children = await dirs(scopedInput.directory)
+        if (!active()) return []
+        return children.map((x) => x.absolute).slice(0, 50)
+      }
       const results = await find()
       if (!active()) return []
       return results.map((rel) => joinPath(scopedInput.directory, rel)).slice(0, 50)
@@ -251,6 +260,7 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
   const layout = useLayout()
   const dialog = useDialog()
   const language = useLanguage()
+  const server = useServer()
 
   const [filter, setFilter] = createSignal("")
   let list: ListRef | undefined
@@ -268,9 +278,14 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
   )
 
   const home = createMemo(() => sync.data.path.home || fallbackPath()?.home || "")
-  const start = createMemo(
-    () => sync.data.path.home || sync.data.path.directory || fallbackPath()?.home || fallbackPath()?.directory,
-  )
+  // For remote/Docker servers prefer the server's cwd (typically "/") over home
+  // (typically "/root" which is empty). For local servers keep the existing
+  // home-first order so the native experience is unchanged.
+  const start = createMemo(() => {
+    if (!server.isLocal())
+      return sync.data.path.directory || fallbackPath()?.directory || sync.data.path.home || fallbackPath()?.home
+    return sync.data.path.home || sync.data.path.directory || fallbackPath()?.home || fallbackPath()?.directory
+  })
 
   const directories = useDirectorySearch({
     sdk,
@@ -311,6 +326,10 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
   })
 
   const items = async (value: string) => {
+    // Read start() synchronously so createResource in useFilteredList tracks it as a
+    // reactive dependency. When start() changes (e.g. fallbackPath resolves after mount),
+    // the List automatically refetches instead of staying stuck on the initial empty result.
+    start()
     const results = await directories(value)
     const directoryRows = results.map((absolute) => toRow(absolute, home(), "folders"))
     return uniqueRows([...recentProjects(), ...directoryRows])

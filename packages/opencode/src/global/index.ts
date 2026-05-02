@@ -2,6 +2,7 @@ import fs from "fs/promises"
 import { xdgData, xdgCache, xdgConfig, xdgState } from "xdg-basedir"
 import path from "path"
 import os from "os"
+import { Flag } from "../flag/flag"
 import { Filesystem } from "../util/filesystem"
 
 const app = "opencode"
@@ -13,9 +14,10 @@ const state = path.join(xdgState!, app)
 
 export namespace Global {
   export const Path = {
-    // Allow override via OPENCODE_TEST_HOME for test isolation
+    // OPENCODE_HOME is the supported runtime override. Keep OPENCODE_TEST_HOME
+    // as a fallback so tests can still isolate from the user's real home dir.
     get home() {
-      return process.env.OPENCODE_TEST_HOME || os.homedir()
+      return Flag.OPENCODE_HOME || process.env.OPENCODE_TEST_HOME || os.homedir()
     },
     data,
     bin: path.join(cache, "bin"),
